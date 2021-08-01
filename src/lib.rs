@@ -99,19 +99,36 @@ let pierced_twice = Pierced::new(Pierced::new(triply_nested));
 assert_eq!(*pierced_twice, 42); // <- Just one jump!
 ```
 
-# Performance
+# Benchmarks
 
-Double indirection is probably not so bad for most use cases.
-But Pierced can usually provide a small performance improvement.
+These benchmarks probably won't represent your use case at all because:
+* They are engineered to make Pierced look good.
+* Compiler optimizations are hard to control.
+* CPU caches and predictions are hard to control. (I bet the figures will be very different on your CPU.)
+* Countless other reasons why you shouldn't trust synthetic benchmarks.
 
-| Benchmark                          	| Normal (ms) 	| Pierced (ms) 	| Difference 	|
-|------------------------------------	|-------------	|--------------	|------------	|
-| Read 100M items from Arc<Vec<i32>> 	| 1142        	| 1088         	| -4.7%      	|
-| Read 100M items from Box<Vec<i32>> 	| 1084        	| 1061         	| -2.1%      	|
-| Read an Arc<Box<i32>> 100M times   	| 795         	| 785          	| -1.3%      	|
-| Read a Box<Box<i32>> 100M times    	| 794         	| 783          	| -1.4%      	|
+*Do your own benchmarks on real-world uses*.
 
-You should try and benchmark your own use case to decide if you should use `Pierced`.
+That said, here are my results:
+
+**Benchmark 1**: Read items from a `Box<Vec<usize>>`, with simulated memory fragmentation.
+
+**Benchmark 2**: Read items from a `SlowBox<Vec<usize>>`. `SlowBox` deliberately slow down `deref()` call greatly.
+
+**Benchmark 3**: Read several `Box<Box<i64>>`.
+
+Time taken by `Pierced<T>` version compared to `T` version.
+
+| Run		| Benchmark 1		| Benchmark 2	 	| Benchmark 3       |
+|-----------|-------------------|-------------------|-------------------|
+| 1			| -40.23%			| -99.69%			| -5.68%            |
+| 2			| -40.59%			| -99.69%			| -5.16%            |
+| 3			| -40.70%			| -99.68%			| +2.69%            |
+| 4			| -39.85%			| -99.68%			| -5.35%            |
+| 5			| -38.90%			| -99.71%			| -5.02%            |
+| 6			| -39.12%			| -99.69%			| -5.53%            |
+| 7			| -40.51%			| -99.69%			| -6.09%            |
+| 8			| -26.99%			| -99.71%			| -6.43%            |
 
 See the benchmarks' code [here](https://github.com/wishawa/pierced/tree/main/src/bin/benchmark/main.rs).
 
@@ -202,7 +219,7 @@ where
     Fallback(Box<T>),
 }
 
-fn is_cachable<T>(outer: &T, target: &<T::Target as Deref>::Target) -> bool
+fn needs_pinning<T>(outer: &T, target: &<T::Target as Deref>::Target) -> bool
 where
     T: Deref,
     T::Target: Deref,
@@ -236,7 +253,7 @@ where
         let inner: &T::Target = outer.deref();
         let target: &<T::Target as Deref>::Target = inner.deref();
 
-        if is_cachable(&outer, target) {
+        if needs_pinning(&outer, target) {
             let target = NonNull::from(target);
             Self {
                 outer: PiercedOuter::Normal(outer),
@@ -302,10 +319,26 @@ where
     }
 }
 
+unsafe impl<T> Send for Pierced<T>
+where
+    T: Deref + Send,
+    T::Target: Deref,
+    <T::Target as Deref>::Target: Sync,
+{
+}
+
+unsafe impl<T> Sync for Pierced<T>
+where
+    T: Deref + Sync,
+    T::Target: Deref,
+    <T::Target as Deref>::Target: Sync,
+{
+}
+
 impl<T> Clone for Pierced<T>
 where
     T: Deref + Clone,
-    T::Target: Sized + Deref,
+    T::Target: Deref,
 {
     #[inline]
     fn clone(&self) -> Self {
@@ -319,7 +352,7 @@ where
 impl<T> Deref for Pierced<T>
 where
     T: Deref,
-    T::Target: Sized + Deref,
+    T::Target: Deref,
 {
     type Target = <T::Target as Deref>::Target;
     #[inline]
@@ -349,7 +382,7 @@ where
 impl<T> AsRef<<T::Target as Deref>::Target> for Pierced<T>
 where
     T: Deref,
-    T::Target: Sized + Deref,
+    T::Target: Deref,
 {
     #[inline]
     fn as_ref(&self) -> &<T::Target as Deref>::Target {
@@ -360,7 +393,7 @@ where
 impl<T> Default for Pierced<T>
 where
     T: Deref + Default,
-    T::Target: Sized + Deref,
+    T::Target: Deref,
 {
     fn default() -> Self {
         Self::new(T::default())
