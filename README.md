@@ -1,4 +1,8 @@
 # Pierced
+
+[<img alt="crates.io" src="https://img.shields.io/crates/v/pierced?style=for-the-badge" height="20">](https://crates.io/crates/pierced)
+[<img alt="crates.io" src="https://img.shields.io/docsrs/pierced?style=for-the-badge" height="20">](https://docs.rs/pierced)
+
 Avoid double indirection in nested smart pointers.
 
 The `Pierced` stuct allows you to cache the deref result of doubly-nested smart pointers.

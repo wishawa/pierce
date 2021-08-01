@@ -3,7 +3,14 @@ name = "pierced"
 version = "0.1.0"
 authors = ["Wisha Wa <wisha.wa@yandex.com>"]
 edition = "2018"
+license = "MIT"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+description = "Avoid double indirection in nested smart pointers."
+readme = "README.md"
+documentation = "https://docs.rs/pierced"
+
+repository = "https://github.com/wishawa/pierced"
+keywords = ["pointer", "caching"]
+categories = ["caching"]
 
 [dependencies]
