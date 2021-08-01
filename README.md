@@ -87,7 +87,7 @@ i.e. the deref target of the inner pointer.
 
 You can obtain a borrow of just T (the outer pointer) using `.borrow_inner()`.
 
-See [the quick example above](#quick_example)
+See [the quick example above](#quick-example)
 
 See the docs at `Pierced` for more details.
 
@@ -107,20 +107,18 @@ assert_eq!(*pierced_twice, 42); // <- Just one jump!
 ## Performance
 
 Double indirection is probably not so bad for most use cases.
-But in some cases, using Pierced can provide a significant performance improvement.
+But Pierced can usually provide a small performance improvement.
 
-In our benchmark reading every value inside an `Arc<Vec<i32>>`,
-the Pierced vesion (`Pierced<Arc<Vec<i32>>>`) **took 10-15% less time** than just `Arc<Vec<i32>>`.
-
-In our benchmark reading every value inside a `Box<Vec<i32>>`,
-the Pierced vesion (`Pierced<Box<Vec<i32>>>`) **took 2-3% less time** than just `Box<Vec<i32>>`.
-
-In our benchmark repeatedly reading value from an `Arc<Box<i32>>`,
-the Pierced version (`Pierced<Arc<Box<i32>>>`) **is slower, taking around 4 more nanoseconds each read** than just `Arc<Box<i32>>`.
+| Benchmark                          	| Normal (ms) 	| Pierced (ms) 	| Difference 	|
+|------------------------------------	|-------------	|--------------	|------------	|
+| Read 100M items from Arc<Vec<i32>> 	| 1142        	| 1088         	| -4.7%      	|
+| Read 100M items from Box<Vec<i32>> 	| 1084        	| 1061         	| -2.1%      	|
+| Read an Arc<Box<i32>> 100M times   	| 795         	| 785          	| -1.3%      	|
+| Read a Box<Box<i32>> 100M times    	| 794         	| 783          	| -1.4%      	|
 
 You should try and benchmark your own use case to decide if you should use `Pierced`.
 
-See the benchmarks' code [here](https://github.com/wishawa/pierced/tree/src/bin/benchmark/main.rs).
+See the benchmarks' code [here](https://github.com/wishawa/pierced/tree/main/src/bin/benchmark/main.rs).
 
 ## Limitations
 
@@ -177,11 +175,15 @@ std::thread::sleep(Duration::from_secs(1));
 assert_ne!(&*weird_pierced, first);
 ```
 
-### Fallback
-Pierced only cache the target address when it is possible to do so safely.
-For that to be true, **the inner pointer must points somewhere outside the outer pointer**, (e.g. somehwere else on the heap or in the static region).
+## Fallback
+
+For Pierced to function optimally, **the final deref target must not be inside the outer pointer**,
+(it should be e.g. somehwere else on the heap or in the static region).
 
 This condition is met by most common smart pointers, including (but not limited to) `Box`, `Vec`, `String`, `Arc`, `Rc`.
 
-If Pierced is unable to cache the target safely, it falls back to calling deref twice every time. You can use `.is_cacached()` to check.
+For pointers that don't meet this condition,
+Pierced pin it to the heap using `Box` to give it a stable address,
+so that the cache would not be left dangling if the Pierced (and the outer pointer in it) is moved.
 
+You should avoid using Pierced if your doubly-nested pointer points to itself anyway.

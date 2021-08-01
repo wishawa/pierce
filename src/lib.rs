@@ -46,7 +46,6 @@ Here's a diagram of what it *might* look like.
 ```text
              ┌───────────────────────────┬───────────────────────────────┬──────────────────────────────────────────┐
              │ Stack                     │ Heap                          │ Heap                                     │
-             │ (Probably)                │ (Probably)                    │ (Probably)                               │
 ┌────────────┼───────────────────────────┼───────────────────────────────┼──────────────────────────────────────────┤
 │ T          │                           │                               │                                          │
 │            │  ┌──────────────────┐     │     ┌───────────────────┐     │    ┌──────────────────────────────────┐  │
@@ -83,7 +82,7 @@ i.e. the deref target of the inner pointer.
 
 You can obtain a borrow of just T (the outer pointer) using `.borrow_inner()`.
 
-See [the quick example above](#quick_example)
+See [the quick example above](#quick-example)
 
 See the docs at [`Pierced`] for more details.
 
@@ -103,20 +102,18 @@ assert_eq!(*pierced_twice, 42); // <- Just one jump!
 # Performance
 
 Double indirection is probably not so bad for most use cases.
-But in some cases, using Pierced can provide a significant performance improvement.
+But Pierced can usually provide a small performance improvement.
 
-In our benchmark reading every value inside an `Arc<Vec<i32>>`,
-the Pierced vesion (`Pierced<Arc<Vec<i32>>>`) **took 10-15% less time** than just `Arc<Vec<i32>>.
-
-In our benchmark reading every value inside a `Box<Vec<i32>>`,
-the Pierced vesion (`Pierced<Box<Vec<i32>>>`) **took 2-3% less time** than just `Box<Vec<i32>>.
-
-In our benchmark repeatedly reading value from an `Arc<Box<i32>>`,
-the Pierced version (`Pierced<Arc<Box<i32>>>`) **is slower, taking around 4 more nanoseconds each read** than just `Arc<Box<i32>>`.
+| Benchmark                          	| Normal (ms) 	| Pierced (ms) 	| Difference 	|
+|------------------------------------	|-------------	|--------------	|------------	|
+| Read 100M items from Arc<Vec<i32>> 	| 1142        	| 1088         	| -4.7%      	|
+| Read 100M items from Box<Vec<i32>> 	| 1084        	| 1061         	| -2.1%      	|
+| Read an Arc<Box<i32>> 100M times   	| 795         	| 785          	| -1.3%      	|
+| Read a Box<Box<i32>> 100M times    	| 794         	| 783          	| -1.4%      	|
 
 You should try and benchmark your own use case to decide if you should use `Pierced`.
 
-See the benchmarks' code [here](https://github.com/wishawa/pierced/tree/src/bin/benchmark/main.rs).
+See the benchmarks' code [here](https://github.com/wishawa/pierced/tree/main/src/bin/benchmark/main.rs).
 
 # Limitations
 
@@ -172,24 +169,37 @@ assert_ne!(&*weird_pierced, first);
 ```
 
 ## Fallback
-Pierced only cache the target address when it is possible to do so safely.
-For that to be true, **the inner pointer must points somewhere outside the outer pointer**, (e.g. somehwere else on the heap or in the static region).
+
+For Pierced to function optimally, **the final deref target must not be inside the outer pointer**,
+(it should be e.g. somehwere else on the heap or in the static region).
 
 This condition is met by most common smart pointers, including (but not limited to) [Box], [Vec], [String], [Arc][std::sync::Arc], [Rc][std::rc::Rc].
 
-If Pierced is unable to cache the target safely, it falls back to calling deref twice every time. You can use `.is_cacached()` to check.
+For pointers that don't meet this condition,
+Pierced pin it to the heap using `Box` to give it a stable address,
+so that the cache would not be left dangling if the Pierced (and the outer pointer in it) is moved.
+
+You should avoid using Pierced if your doubly-nested pointer points to itself anyway.
 */
 
 use std::{mem::size_of, ops::Deref, ptr::NonNull};
 
-#[derive(Debug)]
 pub struct Pierced<T>
 where
     T: Deref,
     T::Target: Deref,
 {
-    outer: T,
-    target: Option<NonNull<<T::Target as Deref>::Target>>,
+    outer: PiercedOuter<T>,
+    target: NonNull<<T::Target as Deref>::Target>,
+}
+
+pub enum PiercedOuter<T>
+where
+    T: Deref,
+    T::Target: Deref,
+{
+    Normal(T),
+    Fallback(Box<T>),
 }
 
 fn is_cachable<T>(outer: &T, target: &<T::Target as Deref>::Target) -> bool
@@ -226,13 +236,20 @@ where
         let inner: &T::Target = outer.deref();
         let target: &<T::Target as Deref>::Target = inner.deref();
 
-        let target = if is_cachable(&outer, target) {
-            Some(NonNull::from(target))
+        if is_cachable(&outer, target) {
+            let target = NonNull::from(target);
+            Self {
+                outer: PiercedOuter::Normal(outer),
+                target,
+            }
         } else {
-            None
-        };
-
-        Self { outer, target }
+            let boxed = Box::new(outer);
+            let target = NonNull::from(&***boxed);
+            Self {
+                outer: PiercedOuter::Fallback(boxed),
+                target,
+            }
+        }
     }
 
     /** Borrow the outer pointer T
@@ -253,7 +270,10 @@ where
     */
     #[inline]
     pub fn borrow_outer(&self) -> &T {
-        &self.outer
+        match &self.outer {
+            PiercedOuter::Normal(ptr) => ptr,
+            PiercedOuter::Fallback(boxed) => &boxed,
+        }
     }
 
     /** Get the outer pointer T out.
@@ -262,7 +282,10 @@ where
      */
     #[inline]
     pub fn into_outer(self) -> T {
-        self.outer
+        match self.outer {
+            PiercedOuter::Normal(ptr) => ptr,
+            PiercedOuter::Fallback(boxed) => *boxed,
+        }
     }
 
     /** Whether or not Pierced has cached the target
@@ -271,9 +294,11 @@ where
 
     This method returns true if the target is cached, false if Pierced is falling back to double-derefing every time.
     */
-    #[inline]
     pub fn is_cached(&self) -> bool {
-        self.target.is_some()
+        match self.outer {
+            PiercedOuter::Normal(..) => true,
+            PiercedOuter::Fallback(..) => false,
+        }
     }
 }
 
@@ -284,7 +309,10 @@ where
 {
     #[inline]
     fn clone(&self) -> Self {
-        Self::new(self.outer.clone())
+        match &self.outer {
+            PiercedOuter::Normal(ptr) => Self::new(ptr.clone()),
+            PiercedOuter::Fallback(boxed) => Self::new((&**boxed).clone()),
+        }
     }
 }
 
@@ -295,30 +323,26 @@ where
 {
     type Target = <T::Target as Deref>::Target;
     #[inline]
-    fn deref<'a>(&'a self) -> &'a Self::Target {
-        match self.target.as_ref() {
-            Some(ptr) => {
-                unsafe { ptr.as_ref() }
-                /* SAFETY:
-                The Pierced must still be alive (not dropped) when this is called,
-                and thus the outer pointer must still be alive.
+    fn deref(&self) -> &Self::Target {
+        unsafe { self.target.as_ref() }
+        /* SAFETY:
+        The Pierced must still be alive (not dropped) when this is called,
+        and thus the outer pointer must still be alive.
 
-                The Pierced might be moved, but moving the Pierced only moves the outer pointer.
-                And if the target points to somewhere in the outer pointer, we wouldn't have cached it (None case below).
+        The Pierced might be moved, but moving the Pierced only moves the outer pointer.
+        And if the target points to somewhere in the outer pointer,
+        we would have pinned the outer pointer by boxing it anyway.
 
-                The inner pointer (which is the deref result of the outer pointer) must last as long as the outer pointer,
-                so it must still be alive too.
+        The inner pointer (which is the deref result of the outer pointer) must last as long as the outer pointer,
+        so it must still be alive too.
 
-                The target (which is the deref result of the inner pointer) must last as long as the inner pointer,
-                so it must still be alive too.
+        The target (which is the deref result of the inner pointer) must last as long as the inner pointer,
+        so it must still be alive too.
 
-                It might seem that interior mutability can cause an issue,
-                but it actually is impossible to get long-living reference out of a RefCell or Mutex,
-                so you can't deref to anything inside an interior-mutable cell anyway.
-                */
-            }
-            None => &self.outer,
-        }
+        It might seem that interior mutability can cause an issue,
+        but it actually is impossible to get long-living reference out of a RefCell or Mutex,
+        so you can't deref to anything inside an interior-mutable cell anyway.
+        */
     }
 }
 
