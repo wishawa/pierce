@@ -1,18 +1,18 @@
 /*! Avoid double indirection in nested smart pointers.
 
-The [`Pierced`] stuct allows you to cache the deref result of doubly-nested smart pointers.
+The [`Pierce`] stuct allows you to cache the deref result of doubly-nested smart pointers.
 
 # Quick Example
 
 ```
 # use std::sync::Arc;
-# use pierced::Pierced;
+# use pierce::Pierce;
 let vec: Vec<i32> = vec![1, 2, 3];
 let arc_vec = Arc::new(vec);
-let pierced = Pierced::new(arc_vec);
+let pierce = Pierce::new(arc_vec);
 
-// Here, the execution jumps directly to the slice. (Without Pierced it would have to jump to the Vec first, than from the Vec to the slice).
-pierced.get(0).unwrap();
+// Here, the execution jumps directly to the slice. (Without Pierce it would have to jump to the Vec first, than from the Vec to the slice).
+pierce.get(0).unwrap();
 ```
 
 # Nested Smart Pointers
@@ -34,9 +34,9 @@ let arc_vec = Arc::new(vec);
 arc_vec.get(0).unwrap();
 ```
 
-# Pierced
+# Pierce
 
-The [`Pierced`] struct, provided by this crate,
+The [`Pierce`] struct, provided by this crate,
 can help reduce the performance cost of nesting smart pointers by **caching the deref result**.
 We double-deref the nested smart pointer at the start, storing the address where the inner pointer points to.
 We can then access the underlying data by just jumping to the stored address. One jump.
@@ -56,7 +56,7 @@ Here's a diagram of what it *might* look like.
 │            │  └──────────────────┘     │     └───────────────────┘     │    └──────────────────────────────────┘  │
 │            │                           │                               │                                          │
 ├────────────┼───────────────────────────┼───────────────────────────────┼──────────────────────────────────────────┤
-│ Pierced<T> │                           │                               │                                          │
+│ Pierce<T>  │                           │                               │                                          │
 │            │  ┌──────────────────┐     │     ┌───────────────────┐     │    ┌──────────────────────────────────┐  │
 │            │  │Outer Pointer     │     │     │Inner Pointer      │     │    │Target                            │  │
 │            │  │                  │     │     │                   │     │    │                                  │  │
@@ -74,35 +74,35 @@ Here's a diagram of what it *might* look like.
 
 # Usage
 
-`Pierced<T>` can be created with `Pierced::new(...)`. `T` should be a doubly-nested pointer (e.g. `Arc<Vec<_>>`, `Box<Box<_>>`).
+`Pierce<T>` can be created with `Pierce::new(...)`. `T` should be a doubly-nested pointer (e.g. `Arc<Vec<_>>`, `Box<Box<_>>`).
 
-[deref][Deref::deref]-ing a `Pierced<T>` returns `&<T::Target as Deref>::Target`,
-i.e. the deref target of the deref target of T (the outer pointer that is wrapped by Pierced),
+[deref][Deref::deref]-ing a `Pierce<T>` returns `&<T::Target as Deref>::Target`,
+i.e. the deref target of the deref target of T (the outer pointer that is wrapped by Pierce),
 i.e. the deref target of the inner pointer.
 
 You can obtain a borrow of just T (the outer pointer) using `.borrow_inner()`.
 
 See [the quick example above](#quick-example)
 
-See the docs at [`Pierced`] for more details.
+See the docs at [`Pierce`] for more details.
 
 ## Deeper Nesting
 
-A `Pierced` reduces two jumps to one.
+A `Pierce` reduces two jumps to one.
 If you have deeper nestings, you can wrap it multiple times.
 
 ```
-# use pierced::Pierced;
+# use pierce::Pierce;
 let triply_nested: Box<Box<Box<i32>>> = Box::new(Box::new(Box::new(42)));
 assert_eq!(***triply_nested, 42); // <- Three jumps!
-let pierced_twice = Pierced::new(Pierced::new(triply_nested));
-assert_eq!(*pierced_twice, 42); // <- Just one jump!
+let pierce_twice = Pierce::new(Pierce::new(triply_nested));
+assert_eq!(*pierce_twice, 42); // <- Just one jump!
 ```
 
 # Benchmarks
 
 These benchmarks probably won't represent your use case at all because:
-* They are engineered to make Pierced look good.
+* They are engineered to make Pierce look good.
 * Compiler optimizations are hard to control.
 * CPU caches and predictions are hard to control. (I bet the figures will be very different on your CPU.)
 * Countless other reasons why you shouldn't trust synthetic benchmarks.
@@ -117,7 +117,7 @@ That said, here are my results:
 
 **Benchmark 3**: Read several `Box<Box<i64>>`.
 
-Time taken by `Pierced<T>` version compared to `T` version.
+Time taken by `Pierce<T>` version compared to `T` version.
 
 | Run		| Benchmark 1		| Benchmark 2	 	| Benchmark 3       |
 |-----------|-------------------|-------------------|-------------------|
@@ -130,23 +130,23 @@ Time taken by `Pierced<T>` version compared to `T` version.
 | 7			| -40.51%			| -99.69%			| -6.09%            |
 | 8			| -26.99%			| -99.71%			| -6.43%            |
 
-See the benchmarks' code [here](https://github.com/wishawa/pierced/tree/main/src/bin/benchmark/main.rs).
+See the benchmarks' code [here](https://github.com/wishawa/pierce/tree/main/src/bin/benchmark/main.rs).
 
 # Limitations
 
 ## Immutable Only
 
-Pierced only work with immutable data.
+Pierce only work with immutable data.
 **Mutability is not supported at all** because I'm pretty sure it would be impossible to implement soundly.
 (If you have an idea please share.)
 
 ## Possibly Incorrect
 
-Pierced is **safe, but not neccessarily correct**.
+Pierce is **safe, but not neccessarily correct**.
 You will not run into memory safety issues (i.e. no "unsafety"),
 but you may get the wrong result when deref-ing.
 
-For Pierced to always deref to the correct result,
+For Pierce to always deref to the correct result,
 it must be true for **both** the outer and inner pointer that
 **an immutable version of the pointer derefs to the same target every time**.
 
@@ -156,7 +156,7 @@ In fact, I have never seen any real-world pointer that doesn't meet this conditi
 Here's an example where this invariant is **not** upheld:
 
 ```should_panic
-# use pierced::Pierced;
+# use pierce::Pierce;
 # use std::ops::Deref;
 use std::time::{SystemTime, Duration, UNIX_EPOCH};
 
@@ -173,44 +173,44 @@ impl Deref for WeirdPointer {
         }
     }
 }
-let weird_pierced = Pierced::new(
+let weird_pierce = Pierce::new(
     Box::new(WeirdPointer)
 );
 
-let first = &*weird_pierced;
+let first = &*weird_pierce;
 std::thread::sleep(Duration::from_secs(1));
 
 // Having slept for 1 second we now expect the WeirdPointer to dereference to another str.
-// But no. The next line will fail because Pierced will still return the same cached target, unaware that WeirdPointer now deref to a different address.
-assert_ne!(&*weird_pierced, first);
+// But no. The next line will fail because Pierce will still return the same cached target, unaware that WeirdPointer now deref to a different address.
+assert_ne!(&*weird_pierce, first);
 ```
 
 ## Fallback
 
-For Pierced to function optimally, **the final deref target must not be inside the outer pointer**,
+For Pierce to function optimally, **the final deref target must not be inside the outer pointer**,
 (it should be e.g. somehwere else on the heap or in the static region).
 
 This condition is met by most common smart pointers, including (but not limited to) [Box], [Vec], [String], [Arc][std::sync::Arc], [Rc][std::rc::Rc].
 
 For pointers that don't meet this condition,
-Pierced pin it to the heap using `Box` to give it a stable address,
-so that the cache would not be left dangling if the Pierced (and the outer pointer in it) is moved.
+Pierce pin it to the heap using `Box` to give it a stable address,
+so that the cache would not be left dangling if the Pierce (and the outer pointer in it) is moved.
 
-You should avoid using Pierced if your doubly-nested pointer points to itself anyway.
+You should avoid using Pierce if your doubly-nested pointer points to itself anyway.
 */
 
 use std::{mem::size_of, ops::Deref, ptr::NonNull};
 
-pub struct Pierced<T>
+pub struct Pierce<T>
 where
     T: Deref,
     T::Target: Deref,
 {
-    outer: PiercedOuter<T>,
+    outer: PierceOuter<T>,
     target: NonNull<<T::Target as Deref>::Target>,
 }
 
-pub enum PiercedOuter<T>
+pub enum PierceOuter<T>
 where
     T: Deref,
     T::Target: Deref,
@@ -236,17 +236,17 @@ where
     )
 }
 
-impl<T> Pierced<T>
+impl<T> Pierce<T>
 where
     T: Deref,
     T::Target: Deref,
 {
-    /** Create a new Pierced
+    /** Create a new Pierce
 
-    Create a Pierced out of the given nested pointer.
+    Create a Pierce out of the given nested pointer.
     This method derefs T twice and cache the address where the inner pointer points to.
 
-    Deref-ing the create Pierced returns the cached reference directly. `deref` is not called on T.
+    Deref-ing the create Pierce returns the cached reference directly. `deref` is not called on T.
      */
     #[inline]
     pub fn new(outer: T) -> Self {
@@ -256,14 +256,14 @@ where
         if needs_pinning(&outer, target) {
             let target = NonNull::from(target);
             Self {
-                outer: PiercedOuter::Normal(outer),
+                outer: PierceOuter::Normal(outer),
                 target,
             }
         } else {
             let boxed = Box::new(outer);
             let target = NonNull::from(&***boxed);
             Self {
-                outer: PiercedOuter::Fallback(boxed),
+                outer: PierceOuter::Fallback(boxed),
                 target,
             }
         }
@@ -273,12 +273,12 @@ where
 
     You can then call the methods on &T.
 
-    You can even call `deref` twice on &T directly to bypass Pierced's cache:
+    You can even call `deref` twice on &T directly to bypass Pierce's cache:
     ```
-    # use pierced::Pierced;
+    # use pierce::Pierce;
     use std::ops::Deref;
-    let pierced = Pierced::new(Box::new(Box::new(5)));
-    let outer: &Box<Box<i32>> = pierced.borrow_outer();
+    let pierce = Pierce::new(Box::new(Box::new(5)));
+    let outer: &Box<Box<i32>> = pierce.borrow_outer();
     let inner: &Box<i32> = outer.deref();
     let target: &i32 = inner.deref();
     assert_eq!(*target, 5);
@@ -288,38 +288,38 @@ where
     #[inline]
     pub fn borrow_outer(&self) -> &T {
         match &self.outer {
-            PiercedOuter::Normal(ptr) => ptr,
-            PiercedOuter::Fallback(boxed) => &boxed,
+            PierceOuter::Normal(ptr) => ptr,
+            PierceOuter::Fallback(boxed) => &boxed,
         }
     }
 
     /** Get the outer pointer T out.
 
-    Like `into_inner()` elsewhere, this consumes the Pierced and return the wrapped pointer.
+    Like `into_inner()` elsewhere, this consumes the Pierce and return the wrapped pointer.
      */
     #[inline]
     pub fn into_outer(self) -> T {
         match self.outer {
-            PiercedOuter::Normal(ptr) => ptr,
-            PiercedOuter::Fallback(boxed) => *boxed,
+            PierceOuter::Normal(ptr) => ptr,
+            PierceOuter::Fallback(boxed) => *boxed,
         }
     }
 
-    /** Whether or not Pierced has cached the target
+    /** Whether or not Pierce has cached the target
 
-    Pierced only cache the target when it is safe to do so. See the "Limitations" section at the [crate docs][crate].
+    Pierce only cache the target when it is safe to do so. See the "Limitations" section at the [crate docs][crate].
 
-    This method returns true if the target is cached, false if Pierced is falling back to double-derefing every time.
+    This method returns true if the target is cached, false if Pierce is falling back to double-derefing every time.
     */
     pub fn is_cached(&self) -> bool {
         match self.outer {
-            PiercedOuter::Normal(..) => true,
-            PiercedOuter::Fallback(..) => false,
+            PierceOuter::Normal(..) => true,
+            PierceOuter::Fallback(..) => false,
         }
     }
 }
 
-unsafe impl<T> Send for Pierced<T>
+unsafe impl<T> Send for Pierce<T>
 where
     T: Deref + Send,
     T::Target: Deref,
@@ -327,7 +327,7 @@ where
 {
 }
 
-unsafe impl<T> Sync for Pierced<T>
+unsafe impl<T> Sync for Pierce<T>
 where
     T: Deref + Sync,
     T::Target: Deref,
@@ -335,7 +335,7 @@ where
 {
 }
 
-impl<T> Clone for Pierced<T>
+impl<T> Clone for Pierce<T>
 where
     T: Deref + Clone,
     T::Target: Deref,
@@ -343,13 +343,13 @@ where
     #[inline]
     fn clone(&self) -> Self {
         match &self.outer {
-            PiercedOuter::Normal(ptr) => Self::new(ptr.clone()),
-            PiercedOuter::Fallback(boxed) => Self::new((&**boxed).clone()),
+            PierceOuter::Normal(ptr) => Self::new(ptr.clone()),
+            PierceOuter::Fallback(boxed) => Self::new((&**boxed).clone()),
         }
     }
 }
 
-impl<T> Deref for Pierced<T>
+impl<T> Deref for Pierce<T>
 where
     T: Deref,
     T::Target: Deref,
@@ -359,10 +359,10 @@ where
     fn deref(&self) -> &Self::Target {
         unsafe { self.target.as_ref() }
         /* SAFETY:
-        The Pierced must still be alive (not dropped) when this is called,
+        The Pierce must still be alive (not dropped) when this is called,
         and thus the outer pointer must still be alive.
 
-        The Pierced might be moved, but moving the Pierced only moves the outer pointer.
+        The Pierce might be moved, but moving the Pierce only moves the outer pointer.
         And if the target points to somewhere in the outer pointer,
         we would have pinned the outer pointer by boxing it anyway.
 
@@ -379,7 +379,7 @@ where
     }
 }
 
-impl<T> AsRef<<T::Target as Deref>::Target> for Pierced<T>
+impl<T> AsRef<<T::Target as Deref>::Target> for Pierce<T>
 where
     T: Deref,
     T::Target: Deref,
@@ -390,7 +390,7 @@ where
     }
 }
 
-impl<T> Default for Pierced<T>
+impl<T> Default for Pierce<T>
 where
     T: Deref + Default,
     T::Target: Deref,
@@ -413,7 +413,7 @@ mod tests {
 
         let v = vec![RefCell::new(1), RefCell::new(2)];
         let a = Arc::new(v);
-        let p1 = Pierced::new(a);
+        let p1 = Pierce::new(a);
         let p2 = p1.clone();
         p1.get(0).unwrap().borrow_mut().add_assign(5);
         assert_eq!(*p2.get(0).unwrap().borrow(), 6);
@@ -426,28 +426,28 @@ mod tests {
 
         let v = String::from("hello world");
         let a = Rc::new(v);
-        let pierced = Pierced::new(a);
-        assert_eq!(&*pierced, "hello world");
-        assert_eq!(pierced.is_cached(), true);
+        let pierce = Pierce::new(a);
+        assert_eq!(&*pierce, "hello world");
+        assert_eq!(pierce.is_cached(), true);
     }
 
     #[test]
     fn test_box_vec() {
         let v = vec![1, 2, 3];
         let a = Box::new(v);
-        let pierced = Pierced::new(a);
-        assert_eq!(*pierced.get(2).unwrap(), 3);
-        assert_eq!(pierced.is_cached(), true);
+        let pierce = Pierce::new(a);
+        assert_eq!(*pierce.get(2).unwrap(), 3);
+        assert_eq!(pierce.is_cached(), true);
     }
 
     #[test]
     fn test_triply_nested() {
         let b: Box<Box<Box<i32>>> = Box::new(Box::new(Box::new(42)));
-        let pierced_once = Pierced::new(b);
-        assert_eq!(*Box::deref(Pierced::deref(&pierced_once)), 42);
-        let pierced_twice = Pierced::new(pierced_once);
-        assert_eq!(*Pierced::deref(&pierced_twice), 42);
-        assert_eq!(pierced_twice.is_cached(), true);
+        let pierce_once = Pierce::new(b);
+        assert_eq!(*Box::deref(Pierce::deref(&pierce_once)), 42);
+        let pierce_twice = Pierce::new(pierce_once);
+        assert_eq!(*Pierce::deref(&pierce_twice), 42);
+        assert_eq!(pierce_twice.is_cached(), true);
     }
 
     #[test]
@@ -473,14 +473,14 @@ mod tests {
         let weird_normal = Box::new(WeirdPointer {
             inner: RefCell::new(true),
         });
-        let weird_pierced = Pierced::new(Box::new(WeirdPointer {
+        let weird_pierce = Pierce::new(Box::new(WeirdPointer {
             inner: RefCell::new(true),
         }));
-        assert_eq!(weird_pierced.is_cached(), true);
+        assert_eq!(weird_pierce.is_cached(), true);
         assert_eq!(&**weird_normal, "hello");
-        assert_eq!(&*weird_pierced, "hello");
+        assert_eq!(&*weird_pierce, "hello");
         assert_eq!(&**weird_normal, "world");
-        assert_eq!(&*weird_pierced, "hello");
+        assert_eq!(&*weird_pierce, "hello");
     }
 
     struct StackPtr<T>(T);
@@ -495,7 +495,7 @@ mod tests {
         let a = 41;
         let b = StackPtr(a);
         let c = StackPtr(b);
-        let p = Pierced::new(c);
+        let p = Pierce::new(c);
 
         assert_eq!(p.is_cached(), false);
     }
@@ -504,7 +504,7 @@ mod tests {
         let a = 41;
         let b = StackPtr(a);
         let c = Box::new(b);
-        let p = Pierced::new(c);
+        let p = Pierce::new(c);
 
         assert_eq!(p.is_cached(), true);
     }
@@ -513,7 +513,7 @@ mod tests {
         let a = 41;
         let b = Box::new(a);
         let c = StackPtr(b);
-        let p = Pierced::new(c);
+        let p = Pierce::new(c);
 
         assert_eq!(p.is_cached(), true);
     }
@@ -523,7 +523,7 @@ mod tests {
         let a = 41;
         let b = Box::new(a);
         let c = Box::new(b);
-        let p = Pierced::new(c);
+        let p = Pierce::new(c);
 
         assert_eq!(p.is_cached(), true);
     }

@@ -1,5 +1,5 @@
 [package]
-name = "pierced"
+name = "pierce"
 version = "0.1.0"
 authors = ["Wisha Wa <wisha.wa@yandex.com>"]
 edition = "2018"
@@ -7,9 +7,9 @@ license = "MIT"
 
 description = "Avoid double indirection in nested smart pointers."
 readme = "README.md"
-documentation = "https://docs.rs/pierced"
+documentation = "https://docs.rs/pierce"
 
-repository = "https://github.com/wishawa/pierced"
+repository = "https://github.com/wishawa/pierce"
 keywords = ["pointer", "caching"]
 categories = ["caching"]
 

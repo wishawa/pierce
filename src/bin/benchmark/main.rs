@@ -1,4 +1,4 @@
-use pierced::Pierced;
+use pierce::Pierce;
 use std::time::{Duration, Instant};
 
 const SMALL_NUM: usize = 65536;
@@ -30,7 +30,7 @@ fn bench_fragmented_box_vec() {
     }
 
     #[inline(never)]
-    fn pierced() -> Duration {
+    fn pierce() -> Duration {
         let v: Vec<usize> = (0..SMALL_NUM).collect();
 
         let mut boxes: Vec<Box<Vec<usize>>> = (0..BIG_NUM).map(|_| Box::new(vec![])).collect();
@@ -39,7 +39,7 @@ fn bench_fragmented_box_vec() {
 
         let mut _sum = 0;
         let start = Instant::now();
-        let p = Pierced::new(b);
+        let p = Pierce::new(b);
         for i in 0..HUGE_NUM {
             _sum += p.get(i % SMALL_NUM).unwrap();
         }
@@ -50,19 +50,19 @@ fn bench_fragmented_box_vec() {
     println!("Fragmented Box<Vec<_>> benchmark");
 
     let mut normal_took = Duration::from_secs(0);
-    let mut pierced_took = Duration::from_secs(0);
+    let mut pierce_took = Duration::from_secs(0);
 
     // Warm up a bit.
     normal();
-    pierced();
+    pierce();
 
     // Actual runs.
     normal_took += normal();
-    pierced_took += pierced();
+    pierce_took += pierce();
     normal_took += normal();
-    pierced_took += pierced();
+    pierce_took += pierce();
 
-    println!("Normal: {:.2?}, Pierced: {:.2?}", normal_took, pierced_took);
+    println!("Normal: {:.2?}, Pierce: {:.2?}", normal_took, pierce_took);
 }
 
 fn bench_slow_box() {
@@ -98,10 +98,10 @@ fn bench_slow_box() {
     }
 
     #[inline(never)]
-    fn pierced() -> Duration {
+    fn pierce() -> Duration {
         let a: SlowBox<Vec<usize>> = SlowBox::new((0..SMALL_NUM).collect());
         let start = Instant::now();
-        let p = Pierced::new(a);
+        let p = Pierce::new(a);
         for i in 0..MEDIUM_NUM {
             p.get(i % SMALL_NUM).unwrap();
         }
@@ -111,19 +111,19 @@ fn bench_slow_box() {
     println!("SlowBox<_> benchmark");
 
     let mut normal_took = Duration::from_secs(0);
-    let mut pierced_took = Duration::from_secs(0);
+    let mut pierce_took = Duration::from_secs(0);
 
     // Warm up a bit.
     normal();
-    pierced();
+    pierce();
 
     // Actual runs.
     normal_took += normal();
-    pierced_took += pierced();
+    pierce_took += pierce();
     normal_took += normal();
-    pierced_took += pierced();
+    pierce_took += pierce();
 
-    println!("Normal: {:.2?}, Pierced: {:.2?}", normal_took, pierced_took);
+    println!("Normal: {:.2?}, Pierce: {:.2?}", normal_took, pierce_took);
 }
 
 fn bench_vec_box_box() {
@@ -149,10 +149,10 @@ fn bench_vec_box_box() {
         start.elapsed()
     }
     #[inline(never)]
-    fn pierced() -> Duration {
+    fn pierce() -> Duration {
         let start = Instant::now();
-        let v: Vec<Pierced<Box<Box<i64>>>> = (0..MEDIUM_NUM)
-            .map(|i| Pierced::new(Box::new(Box::new(i as i64))))
+        let v: Vec<Pierce<Box<Box<i64>>>> = (0..MEDIUM_NUM)
+            .map(|i| Pierce::new(Box::new(Box::new(i as i64))))
             .collect();
         let mut sum = 0i64;
         for _ in 0..MEDIUM_NUM {
@@ -171,21 +171,21 @@ fn bench_vec_box_box() {
     }
 
     let mut normal_took = Duration::from_secs(0);
-    let mut pierced_took = Duration::from_secs(0);
+    let mut pierce_took = Duration::from_secs(0);
 
     println!("Vec<Box<Box<_>>> benchmark");
 
     // Warm up a bit.
     normal();
-    pierced();
+    pierce();
 
     // Actual runs.
     normal_took += normal();
-    pierced_took += pierced();
+    pierce_took += pierce();
     normal_took += normal();
-    pierced_took += pierced();
+    pierce_took += pierce();
 
-    println!("Normal: {:.2?}, Pierced: {:.2?}", normal_took, pierced_took);
+    println!("Normal: {:.2?}, Pierce: {:.2?}", normal_took, pierce_took);
 }
 
 fn main() {
