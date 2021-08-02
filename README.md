@@ -139,70 +139,19 @@ Time taken by `Pierce<T>` version compared to `T` version.
 
 See the benchmarks' code [here](https://github.com/wishawa/pierce/tree/main/src/bin/benchmark/main.rs).
 
-## Limitations
+# Limitations
 
-### Immutable Only
+## Immutable Only
 
 Pierce only work with immutable data.
 **Mutability is not supported at all** because I'm pretty sure it would be impossible to implement soundly.
 (If you have an idea please share.)
 
-### Possibly Incorrect
+## Requires `StableDeref`
 
-Pierce is **safe, but not neccessarily correct**.
-You will not run into memory safety issues (i.e. no "unsafety"),
-but you may get the wrong result when deref-ing.
+Pointer wrapped by Pierce must be [`StableDeref`](https://docs.rs/stable_deref_trait/).
+If your pointer type meets the conditions required, you can `unsafe impl StableDeref for T {}` on it.
+The trait is re-exported at `pierce::StableDeref`.
 
-For Pierce to always deref to the correct result,
-it must be true for **both** the outer and inner pointer that
-**an immutable version of the pointer derefs to the same target every time**.
-
-This condition is met by most common smart pointers, including (but not limited to) `Box`, `Vec`, `String`, `Arc`, `Rc`.
-In fact, I have never seen any real-world pointer that doesn't meet this condition. If you know one, please do share.
-
-Here's an example where this invariant is **not** upheld:
-
-```rust
-// THIS DOESN'T WORK
-
-use pierce::Pierce;
-use std::ops::Deref;
-use std::time::{SystemTime, Duration, UNIX_EPOCH};
-
-// A really strange smart pointer that points to different strs based on the current time.
-struct WeirdPointer;
-impl Deref for WeirdPointer {
-    type Target = str;
-    fn deref(&self) -> &Self::Target {
-        if SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs() % 2 == 0 {
-            "even unix timestamp"
-        }
-        else {
-            "odd unix timestamp"
-        }
-    }
-}
-let weird_pierce = Pierce::new(
-    Box::new(WeirdPointer)
-);
-
-let first = &*weird_pierce;
-std::thread::sleep(Duration::from_secs(1));
-
-// Having slept for 1 second we now expect the WeirdPointer to dereference to another str.
-// But no. The next line will fail because Pierce will still return the same cached target, unaware that WeirdPointer now deref to a different address.
-assert_ne!(&*weird_pierce, first);
-```
-
-## Fallback
-
-For Pierce to function optimally, **the double-deref target must not be inside the outer pointer**,
-(it should be e.g. somehwere else on the heap or in the static region).
-
-This condition is met by most common smart pointers, including (but not limited to) `Box`, `Vec`, `String`, `Arc`, `Rc`.
-
-For pointers that don't meet this condition,
-Pierce falls back to pin it to the heap using `Box` to give it a stable address,
-so that the cache would not be left dangling if the Pierce (and the outer pointer in it) is moved.
-
-You should avoid using Pierce if your doubly-nested pointer points to itself anyway.
+The vast majority of pointers are `StableDeref`,
+including `Box`, `Vec`, `String`, `Rc`, `Arc`.

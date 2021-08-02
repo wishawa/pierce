@@ -81,10 +81,10 @@ Here's a diagram of what it *might* look like.
 `Pierce<T>` can be created with `Pierce::new(...)`. `T` should be a doubly-nested pointer (e.g. `Arc<Vec<_>>`, `Box<Box<_>>`).
 
 [deref][Deref::deref]-ing a `Pierce<T>` returns `&<T::Target as Deref>::Target`,
-i.e. the deref target of the deref target of T (the outer pointer that is wrapped by Pierce),
+i.e. the deref target of the deref target of `T` (the outer pointer that is wrapped by Pierce),
 i.e. the deref target of the inner pointer.
 
-You can also obtain a borrow of just T (the outer pointer) using `.borrow_inner()`.
+You can also obtain a borrow of just `T` (the outer pointer) using `.borrow_inner()`.
 
 See the docs at [`Pierce`] for more details.
 
@@ -142,157 +142,55 @@ Pierce only work with immutable data.
 **Mutability is not supported at all** because I'm pretty sure it would be impossible to implement soundly.
 (If you have an idea please share.)
 
-## Possibly Incorrect
+## Requires `StableDeref`
 
-Pierce is **safe, but not neccessarily correct**.
-You will not run into memory safety issues (i.e. no "unsafety"),
-but you may get the wrong result when deref-ing.
+Pointer wrapped by Pierce must be [`StableDeref`].
+If your pointer type meets the conditions required, you can `unsafe impl StableDeref for T {}` on it.
+The trait is re-exported at `pierce::StableDeref`.
 
-For Pierce to always deref to the correct result,
-it must be true for **both** the outer and inner pointer that
-**an immutable version of the pointer derefs to the same target every time**.
-
-This condition is met by most common smart pointers, including (but not limited to) [Box], [Vec], [String], [Arc][std::sync::Arc], [Rc][std::rc::Rc].
-In fact, I have never seen any real-world pointer that doesn't meet this condition. If you know one, please do share.
-
-Here's an example where this invariant is **not** upheld:
-
-```should_panic
-# use pierce::Pierce;
-# use std::ops::Deref;
-use std::time::{SystemTime, Duration, UNIX_EPOCH};
-
-// A really strange smart pointer that points to different strs based on the current time.
-struct WeirdPointer;
-impl Deref for WeirdPointer {
-    type Target = str;
-    fn deref(&self) -> &Self::Target {
-        if SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs() % 2 == 0 {
-            "even unix timestamp"
-        }
-        else {
-            "odd unix timestamp"
-        }
-    }
-}
-let weird_pierce = Pierce::new(
-    Box::new(WeirdPointer)
-);
-
-let first = &*weird_pierce;
-std::thread::sleep(Duration::from_secs(1));
-
-// Having slept for 1 second we now expect the WeirdPointer to dereference to another str.
-// But no. The next line will fail because Pierce will still return the same cached target, unaware that WeirdPointer now deref to a different address.
-assert_ne!(&*weird_pierce, first);
-```
-
-## Fallback
-
-For Pierce to function optimally, **the double-deref target must not be inside the outer pointer**,
-(it should be e.g. somehwere else on the heap or in the static region).
-
-This condition is met by most common smart pointers, including (but not limited to) [Box], [Vec], [String], [Arc][std::sync::Arc], [Rc][std::rc::Rc].
-
-For pointers that don't meet this condition,
-Pierce falls back to pin it to the heap using `Box` to give it a stable address,
-so that the cache would not be left dangling if the Pierce (and the outer pointer in it) is moved.
-
-You should avoid using Pierce if your doubly-nested pointer points to itself anyway.
+The vast majority of pointers are `StableDeref`,
+including [Box], [Vec], [String], [Rc][std::rc::Rc], [Arc][std::sync::Arc].
 */
 
-use std::{mem::size_of, ops::Deref, ptr::NonNull};
+use std::{ops::Deref, ptr::NonNull};
 
+pub use stable_deref_trait::StableDeref;
+
+
+/** Cache doubly-nested pointers.
+
+A `Pierce<T>` stores `T` along with a cached pointer to `<T::Target as Deref>::Target`.
+*/
 pub struct Pierce<T>
 where
-    T: Deref,
-    T::Target: Deref,
+    T: StableDeref,
+    T::Target: StableDeref,
 {
-    outer: PierceOuter<T>,
+    outer: T,
     target: NonNull<<T::Target as Deref>::Target>,
-}
-
-enum PierceOuter<T>
-where
-    T: Deref,
-    T::Target: Deref,
-{
-    Normal(T),
-    Fallback(Box<T>),
-}
-
-fn needs_pinning<T>(outer: &T, target: &<T::Target as Deref>::Target) -> bool
-where
-    T: Deref,
-    T::Target: Deref,
-{
-    fn points_outside(start: usize, size: usize, ptr: usize) -> bool {
-        ptr < start || ptr >= start + size
-    }
-
-    let outer_casted = outer as *const T as usize;
-    points_outside(
-        outer_casted,
-        size_of::<T>(),
-        target as *const <T::Target as Deref>::Target as *const () as usize,
-    )
 }
 
 impl<T> Pierce<T>
 where
-    T: Deref,
-    T::Target: Deref,
+    T: StableDeref,
+    T::Target: StableDeref,
 {
-    /** Create a new Pierce
+    /** Create a new Pierce.
 
     Create a Pierce out of the given nested pointer.
-    This method derefs T twice and cache the address where the inner pointer points to.
+    This method derefs `T` twice and cache the address where the inner pointer points to.
 
-    Deref-ing the created Pierce returns the cached reference directly. `deref` is not called on T.
+    Deref-ing the created Pierce returns the cached reference directly. `deref` is not called on `T`.
      */
     #[inline]
     pub fn new(outer: T) -> Self {
         let inner: &T::Target = outer.deref();
         let target: &<T::Target as Deref>::Target = inner.deref();
-
-        if needs_pinning(&outer, target) {
-            let target = NonNull::from(target);
-            Self {
-                outer: PierceOuter::Normal(outer),
-                target,
-            }
-        } else {
-            let boxed = Box::new(outer);
-            let target = NonNull::from(&***boxed);
-            Self {
-                outer: PierceOuter::Fallback(boxed),
-                target,
-            }
-        }
+        let target = NonNull::from(target);
+        Self { outer, target }
     }
 
-    /** Create a new Pierce if it won't fall back to pinning
-
-    See the "Limitations" section at the [crate docs][crate] for more info about falling back.
-
-    This returns None if the double-deref target of the given `T` points to somewhere in itself.
-    */
-    #[inline]
-    pub fn new_no_pin(outer: T) -> Option<Self> {
-        let inner: &T::Target = outer.deref();
-        let target: &<T::Target as Deref>::Target = inner.deref();
-        if needs_pinning(&outer, target) {
-            let target = NonNull::from(target);
-            Some(Self {
-                outer: PierceOuter::Normal(outer),
-                target,
-            })
-        } else {
-            None
-        }
-    }
-
-    /** Borrow the outer pointer `T`
+    /** Borrow the outer pointer `T`.
 
     You can then call the methods on `&T`.
 
@@ -310,70 +208,57 @@ where
     */
     #[inline]
     pub fn borrow_outer(&self) -> &T {
-        match &self.outer {
-            PierceOuter::Normal(ptr) => ptr,
-            PierceOuter::Fallback(boxed) => &boxed,
-        }
+        &self.outer
     }
 
-    /** Get the outer pointer T out.
+    /** Get the outer pointer `T` out.
 
     Like `into_inner()` elsewhere, this consumes the Pierce and return the wrapped pointer.
      */
     #[inline]
     pub fn into_outer(self) -> T {
-        match self.outer {
-            PierceOuter::Normal(ptr) => ptr,
-            PierceOuter::Fallback(boxed) => *boxed,
-        }
-    }
-
-    /** Whether or not Pierce has falled back to pinning to the heap
-
-    See the "Limitations" section at the [crate docs][crate] for more info about falling back.
-    */
-    pub fn is_fallback(&self) -> bool {
-        match self.outer {
-            PierceOuter::Normal(..) => false,
-            PierceOuter::Fallback(..) => true,
-        }
+        self.outer
     }
 }
 
 unsafe impl<T> Send for Pierce<T>
 where
-    T: Deref + Send,
-    T::Target: Deref,
+    T: StableDeref + Send,
+    T::Target: StableDeref,
     <T::Target as Deref>::Target: Sync,
 {
 }
 
 unsafe impl<T> Sync for Pierce<T>
 where
-    T: Deref + Sync,
-    T::Target: Deref,
+    T: StableDeref + Sync,
+    T::Target: StableDeref,
     <T::Target as Deref>::Target: Sync,
+{
+}
+
+unsafe impl<T> StableDeref for Pierce<T>
+where
+    T: StableDeref,
+    T::Target: StableDeref,
 {
 }
 
 impl<T> Clone for Pierce<T>
 where
-    T: Deref + Clone,
-    T::Target: Deref,
+    T: StableDeref + Clone,
+    T::Target: StableDeref,
 {
     #[inline]
     fn clone(&self) -> Self {
-        match &self.outer {
-            PierceOuter::Normal(ptr) => Self::new(ptr.clone()),
-            PierceOuter::Fallback(boxed) => Self::new((&**boxed).clone()),
-        }
+        Self::new(self.outer.clone())
     }
 }
 
 impl<T> Deref for Pierce<T>
 where
-    T: Deref,
-    T::Target: Deref,
+    T: StableDeref,
+    T::Target: StableDeref,
 {
     type Target = <T::Target as Deref>::Target;
     #[inline]
@@ -383,9 +268,7 @@ where
         The Pierce must still be alive (not dropped) when this is called,
         and thus the outer pointer must still be alive.
 
-        The Pierce might be moved, but moving the Pierce only moves the outer pointer.
-        And if the target points to somewhere in the outer pointer,
-        we would have pinned the outer pointer by boxing it anyway.
+        The Pierce might be moved, but it must be StableDeref so moving is ok.
 
         The inner pointer (which is the deref result of the outer pointer) must last as long as the outer pointer,
         so it must still be alive too.
@@ -402,8 +285,8 @@ where
 
 impl<T> AsRef<<T::Target as Deref>::Target> for Pierce<T>
 where
-    T: Deref,
-    T::Target: Deref,
+    T: StableDeref,
+    T::Target: StableDeref,
 {
     #[inline]
     fn as_ref(&self) -> &<T::Target as Deref>::Target {
@@ -413,8 +296,8 @@ where
 
 impl<T> Default for Pierce<T>
 where
-    T: Deref + Default,
-    T::Target: Deref,
+    T: StableDeref + Default,
+    T::Target: StableDeref,
 {
     fn default() -> Self {
         Self::new(T::default())
@@ -423,7 +306,6 @@ where
 
 #[cfg(test)]
 mod tests {
-
     use super::*;
 
     #[test]
@@ -438,7 +320,6 @@ mod tests {
         let p2 = p1.clone();
         p1.get(0).unwrap().borrow_mut().add_assign(5);
         assert_eq!(*p2.get(0).unwrap().borrow(), 6);
-        assert_eq!(p1.is_fallback(), false);
     }
 
     #[test]
@@ -449,7 +330,6 @@ mod tests {
         let a = Rc::new(v);
         let pierce = Pierce::new(a);
         assert_eq!(&*pierce, "hello world");
-        assert_eq!(pierce.is_fallback(), false);
     }
 
     #[test]
@@ -458,7 +338,6 @@ mod tests {
         let a = Box::new(v);
         let pierce = Pierce::new(a);
         assert_eq!(*pierce.get(2).unwrap(), 3);
-        assert_eq!(pierce.is_fallback(), false);
     }
 
     #[test]
@@ -468,97 +347,6 @@ mod tests {
         assert_eq!(*Box::deref(Pierce::deref(&pierce_once)), 42);
         let pierce_twice = Pierce::new(pierce_once);
         assert_eq!(*Pierce::deref(&pierce_twice), 42);
-        assert_eq!(pierce_twice.is_fallback(), false);
-    }
-
-    #[test]
-    fn test_weird_pointer() {
-        use std::cell::RefCell;
-
-        struct WeirdPointer {
-            inner: RefCell<bool>,
-        }
-        impl Deref for WeirdPointer {
-            type Target = str;
-            fn deref(&self) -> &Self::Target {
-                let mut b = self.inner.borrow_mut();
-                if *b {
-                    *b = false;
-                    "hello"
-                } else {
-                    *b = true;
-                    "world"
-                }
-            }
-        }
-        let weird_normal = Box::new(WeirdPointer {
-            inner: RefCell::new(true),
-        });
-        let weird_pierce = Pierce::new(Box::new(WeirdPointer {
-            inner: RefCell::new(true),
-        }));
-        assert_eq!(weird_pierce.is_fallback(), false);
-        assert_eq!(&**weird_normal, "hello");
-        assert_eq!(&*weird_pierce, "hello");
-        assert_eq!(&**weird_normal, "world");
-        assert_eq!(&*weird_pierce, "hello");
-    }
-
-    struct StackPtr<T>(T);
-    impl<T> Deref for StackPtr<T> {
-        type Target = T;
-        fn deref(&self) -> &Self::Target {
-            &self.0
-        }
-    }
-    #[test]
-    fn test_stack_stack() {
-        let a = 41;
-        let b = StackPtr(a);
-        let c = StackPtr(b);
-        let p = Pierce::new(c);
-
-        assert_eq!(p.is_fallback(), true);
-    }
-    #[test]
-    fn test_box_stack() {
-        let a = 41;
-        let b = StackPtr(a);
-        let c = Box::new(b);
-        let p = Pierce::new(c);
-
-        assert_eq!(p.is_fallback(), false);
-    }
-    #[test]
-    fn test_stack_box() {
-        let a = 41;
-        let b = Box::new(a);
-        let c = StackPtr(b);
-        let p = Pierce::new(c);
-
-        assert_eq!(p.is_fallback(), false);
-    }
-
-    #[test]
-    fn test_box_box() {
-        let a = 41;
-        let b = Box::new(a);
-        let c = Box::new(b);
-        let p = Pierce::new(c);
-
-        assert_eq!(p.is_fallback(), false);
-    }
-
-    #[test]
-    fn test_no_pin_some() {
-        let b = Box::new(Box::new(50));
-        assert!(Pierce::new_no_pin(b).is_some());
-    }
-
-    #[test]
-    fn test_no_pin_none() {
-        let b = StackPtr(StackPtr(6));
-        assert!(Pierce::new_no_pin(b).is_none());
     }
 
     #[test]
@@ -588,5 +376,25 @@ mod tests {
         });
         h1.join().unwrap();
         h2.join().unwrap();
+    }
+
+    #[test]
+    fn test_size_of() {
+        use std::mem::size_of;
+        use std::sync::Arc;
+        fn inner_test<T>()
+        where
+            T: StableDeref,
+            T::Target: StableDeref,
+        {
+            assert_eq!(
+                size_of::<T>() + size_of::<&<T::Target as Deref>::Target>(),
+                size_of::<Pierce<T>>()
+            );
+        }
+        inner_test::<Box<Vec<i32>>>();
+        inner_test::<Box<Box<i32>>>();
+        inner_test::<Arc<Vec<i32>>>();
+        inner_test::<Box<Arc<i32>>>();
     }
 }

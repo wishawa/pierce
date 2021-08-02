@@ -1,4 +1,4 @@
-use pierce::Pierce;
+use pierce::{Pierce, StableDeref};
 use std::time::{Duration, Instant};
 
 const SMALL_NUM: usize = 65536;
@@ -87,6 +87,7 @@ fn bench_slow_box() {
             Self(Box::new(inner))
         }
     }
+    unsafe impl<T> StableDeref for SlowBox<T> {}
 
     #[inline(never)]
     fn normal() -> Duration {
