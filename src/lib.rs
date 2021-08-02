@@ -208,7 +208,7 @@ where
     target: NonNull<<T::Target as Deref>::Target>,
 }
 
-pub enum PierceOuter<T>
+enum PierceOuter<T>
 where
     T: Deref,
     T::Target: Deref,
