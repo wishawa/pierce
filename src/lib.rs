@@ -275,7 +275,7 @@ where
 
     See the "Limitations" section at the [crate docs][crate] for more info about falling back.
 
-    This returns None if the double-deref target of the given `T` points to somewhere in T.
+    This returns None if the double-deref target of the given `T` points to somewhere in itself.
     */
     #[inline]
     pub fn new_no_pin(outer: T) -> Option<Self> {
@@ -559,5 +559,34 @@ mod tests {
     fn test_no_pin_none() {
         let b = StackPtr(StackPtr(6));
         assert!(Pierce::new_no_pin(b).is_none());
+    }
+
+    #[test]
+    fn test_send() {
+        use std::sync::Arc;
+        let p1 = Pierce::new(Arc::new(String::from("asdf")));
+        let p2 = p1.clone();
+        let h1 = std::thread::spawn(move || {
+            assert_eq!(&*p1, "asdf");
+        });
+        let h2 = std::thread::spawn(move || {
+            assert_eq!(&*p2, "asdf");
+        });
+        h1.join().unwrap();
+        h2.join().unwrap();
+    }
+    #[test]
+    fn test_sync() {
+        let p: Pierce<Box<String>> = Pierce::new(Box::new(String::from("hello world")));
+        let p1: &'static Pierce<Box<String>> = Box::leak(Box::new(p));
+        let p2: &'static Pierce<Box<String>> = p1;
+        let h1 = std::thread::spawn(move || {
+            assert_eq!(&**p1, "hello world");
+        });
+        let h2 = std::thread::spawn(move || {
+            assert_eq!(&**p2, "hello world");
+        });
+        h1.join().unwrap();
+        h2.join().unwrap();
     }
 }

@@ -65,6 +65,7 @@ fn bench_fragmented_box_vec() {
     println!("Normal: {:.2?}, Pierce: {:.2?}", normal_took, pierce_took);
 }
 
+#[inline(never)]
 fn bench_slow_box() {
     // SlowBox: like Box but computes Collatz(63) every time you want to deref it.
     struct SlowBox<T>(Box<T>);
@@ -126,6 +127,7 @@ fn bench_slow_box() {
     println!("Normal: {:.2?}, Pierce: {:.2?}", normal_took, pierce_took);
 }
 
+#[inline(never)]
 fn bench_vec_box_box() {
     #[inline(never)]
     fn normal() -> Duration {
@@ -188,8 +190,75 @@ fn bench_vec_box_box() {
     println!("Normal: {:.2?}, Pierce: {:.2?}", normal_took, pierce_took);
 }
 
+#[inline(never)]
+fn bench_fragmented_arc_string() {
+    #[inline(never)]
+    fn normal() -> Duration {
+        let mut strings: Vec<Box<String>> = (0..BIG_NUM)
+            .map(|idx| Box::new((idx * idx).to_string()))
+            .collect();
+        let (l, r) = strings.split_at_mut(BIG_NUM / 2);
+        for i in 0..(BIG_NUM / 2) {
+            let l = &mut *l[i];
+            let r = &mut *r[i];
+            std::mem::swap(l, r);
+        }
+        let t: u64 = strings[14620135].parse().unwrap();
+        let u = t.to_string();
+        let start = Instant::now();
+        for (idx, s) in strings.iter().enumerate() {
+            if (**s).partial_cmp(&u) == Some(std::cmp::Ordering::Equal) {
+                assert_eq!(idx, 14620135);
+                break;
+            }
+        }
+        start.elapsed()
+    }
+
+    #[inline(never)]
+    fn pierce() -> Duration {
+        let mut strings: Vec<Box<String>> = (0..BIG_NUM)
+            .map(|idx| Box::new((idx * idx).to_string()))
+            .collect();
+        let (l, r) = strings.split_at_mut(BIG_NUM / 2);
+        for i in 0..(BIG_NUM / 2) {
+            let l = &mut *l[i];
+            let r = &mut *r[i];
+            std::mem::swap(l, r);
+        }
+        let strings: Vec<Pierce<Box<String>>> = strings.into_iter().map(Pierce::new).collect();
+        let t: u64 = strings[14620135].parse().unwrap();
+        let u = t.to_string();
+        let start = Instant::now();
+        for (idx, s) in strings.iter().enumerate() {
+            if (*s).partial_cmp(&u) == Some(std::cmp::Ordering::Equal) {
+                assert_eq!(idx, 14620135);
+                break;
+            }
+        }
+        start.elapsed()
+    }
+    let mut normal_took = Duration::from_secs(0);
+    let mut pierce_took = Duration::from_secs(0);
+
+    println!("Vec<Arc<String>> benchmark");
+
+    // Warm up a bit.
+    normal();
+    pierce();
+
+    // Actual runs.
+    normal_took += normal();
+    pierce_took += pierce();
+    normal_took += normal();
+    pierce_took += pierce();
+
+    println!("Normal: {:.2?}, Pierce: {:.2?}", normal_took, pierce_took);
+}
+
 fn main() {
     bench_fragmented_box_vec();
     bench_slow_box();
     bench_vec_box_box();
+    bench_fragmented_arc_string();
 }
