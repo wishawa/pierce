@@ -11,7 +11,9 @@ let vec: Vec<i32> = vec![1, 2, 3];
 let arc_vec = Arc::new(vec);
 let pierce = Pierce::new(arc_vec);
 
-// Here, the execution jumps directly to the slice to call `.get(...)`. (Without Pierce it would have to jump to the Vec first, than from the Vec to the slice).
+// Here, the execution jumps directly to the slice to call `.get(...)`.
+// Without Pierce it would have to jump to the Vec first,
+// than from the Vec to the slice.
 pierce.get(0).unwrap();
 ```
 
@@ -30,7 +32,9 @@ then follow the inner pointer to where the underlying data is. Two [Deref]-ings.
 let vec: Vec<i32> = vec![1, 2, 3];
 let arc_vec = Arc::new(vec);
 
-// Here, the `Arc<Vec<i32>>` is first dereferenced to the `Vec<i32>`, then the Vec is dereferenced to the underlying i32 slice, on which `.get(...)` is called.
+// Here, the `Arc<Vec<i32>>` is first dereferenced to the `Vec<i32>`,
+// then the Vec is dereferenced to the underlying i32 slice,
+// on which `.get(...)` is called.
 arc_vec.get(0).unwrap();
 ```
 
@@ -185,13 +189,13 @@ assert_ne!(&*weird_pierce, first);
 
 ## Fallback
 
-For Pierce to function optimally, **the final deref target must not be inside the outer pointer**,
+For Pierce to function optimally, **the double-deref target must not be inside the outer pointer**,
 (it should be e.g. somehwere else on the heap or in the static region).
 
 This condition is met by most common smart pointers, including (but not limited to) [Box], [Vec], [String], [Arc][std::sync::Arc], [Rc][std::rc::Rc].
 
 For pointers that don't meet this condition,
-Pierce pin it to the heap using `Box` to give it a stable address,
+Pierce falls back to pin it to the heap using `Box` to give it a stable address,
 so that the cache would not be left dangling if the Pierce (and the outer pointer in it) is moved.
 
 You should avoid using Pierce if your doubly-nested pointer points to itself anyway.
@@ -244,7 +248,7 @@ where
     Create a Pierce out of the given nested pointer.
     This method derefs T twice and cache the address where the inner pointer points to.
 
-    Deref-ing the create Pierce returns the cached reference directly. `deref` is not called on T.
+    Deref-ing the created Pierce returns the cached reference directly. `deref` is not called on T.
      */
     #[inline]
     pub fn new(outer: T) -> Self {
@@ -267,11 +271,11 @@ where
         }
     }
 
-    /** Borrow the outer pointer T
+    /** Borrow the outer pointer `T`
 
-    You can then call the methods on &T.
+    You can then call the methods on `&T`.
 
-    You can even call `deref` twice on &T directly to bypass Pierce's cache:
+    You can even call `deref` twice on `&T` directly to bypass Pierce's cache:
     ```
     # use pierce::Pierce;
     use std::ops::Deref;

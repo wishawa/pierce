@@ -16,7 +16,9 @@ let vec: Vec<i32> = vec![1, 2, 3];
 let arc_vec = Arc::new(vec);
 let pierce = Pierce::new(arc_vec);
 
-// Here, the execution jumps directly to the slice to call `.get(...)`. (Without Pierce it would have to jump to the Vec first, than from the Vec to the slice).
+// Here, the execution jumps directly to the slice to call `.get(...)`.
+// Without Pierce it would have to jump to the Vec first,
+// than from the Vec to the slice.
 pierce.get(0).unwrap();
 ```
 
@@ -35,7 +37,9 @@ use std::sync::Arc;
 let vec: Vec<i32> = vec![1, 2, 3];
 let arc_vec = Arc::new(vec);
 
-// Here, the `Arc<Vec<i32>>` is first dereferenced to the `Vec<i32>`, then the Vec is dereferenced to the underlying i32 slice, on which `.get(...)` is called.
+// Here, the `Arc<Vec<i32>>` is first dereferenced to the `Vec<i32>`,
+// then the Vec is dereferenced to the underlying i32 slice,
+// on which `.get(...)` is called.
 arc_vec.get(0).unwrap();
 ```
 
@@ -192,13 +196,13 @@ assert_ne!(&*weird_pierce, first);
 
 ## Fallback
 
-For Pierce to function optimally, **the final deref target must not be inside the outer pointer**,
+For Pierce to function optimally, **the double-deref target must not be inside the outer pointer**,
 (it should be e.g. somehwere else on the heap or in the static region).
 
 This condition is met by most common smart pointers, including (but not limited to) `Box`, `Vec`, `String`, `Arc`, `Rc`.
 
 For pointers that don't meet this condition,
-Pierce pin it to the heap using `Box` to give it a stable address,
+Pierce falls back to pin it to the heap using `Box` to give it a stable address,
 so that the cache would not be left dangling if the Pierce (and the outer pointer in it) is moved.
 
 You should avoid using Pierce if your doubly-nested pointer points to itself anyway.
