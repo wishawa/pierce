@@ -156,7 +156,6 @@ use std::{ops::Deref, ptr::NonNull};
 
 pub use stable_deref_trait::StableDeref;
 
-
 /** Cache doubly-nested pointers.
 
 A `Pierce<T>` stores `T` along with a cached pointer to `<T::Target as Deref>::Target`.

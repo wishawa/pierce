@@ -15,3 +15,8 @@ categories = ["caching"]
 
 [dependencies]
 stable_deref_trait = "1.2.0"
+
+[workspace]
+members = [
+	"benchmark/"
+]
