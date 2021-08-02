@@ -271,11 +271,32 @@ where
         }
     }
 
+    /** Create a new Pierce if it won't fall back to pinning
+
+    See the "Limitations" section at the [crate docs][crate] for more info about falling back.
+
+    This returns None if the double-deref target of the given `T` points to somewhere in T.
+    */
+    #[inline]
+    pub fn new_no_pin(outer: T) -> Option<Self> {
+        let inner: &T::Target = outer.deref();
+        let target: &<T::Target as Deref>::Target = inner.deref();
+        if needs_pinning(&outer, target) {
+            let target = NonNull::from(target);
+            Some(Self {
+                outer: PierceOuter::Normal(outer),
+                target,
+            })
+        } else {
+            None
+        }
+    }
+
     /** Borrow the outer pointer `T`
 
     You can then call the methods on `&T`.
 
-    You can even call `deref` twice on `&T` directly to bypass Pierce's cache:
+    You can even call `deref` twice on `&T` yourself to bypass Pierce's cache:
     ```
     # use pierce::Pierce;
     use std::ops::Deref;
@@ -307,16 +328,14 @@ where
         }
     }
 
-    /** Whether or not Pierce has cached the target
+    /** Whether or not Pierce has falled back to pinning to the heap
 
-    Pierce only cache the target when it is safe to do so. See the "Limitations" section at the [crate docs][crate].
-
-    This method returns true if the target is cached, false if Pierce is falling back to double-derefing every time.
+    See the "Limitations" section at the [crate docs][crate] for more info about falling back.
     */
-    pub fn is_cached(&self) -> bool {
+    pub fn is_fallback(&self) -> bool {
         match self.outer {
-            PierceOuter::Normal(..) => true,
-            PierceOuter::Fallback(..) => false,
+            PierceOuter::Normal(..) => false,
+            PierceOuter::Fallback(..) => true,
         }
     }
 }
@@ -419,7 +438,7 @@ mod tests {
         let p2 = p1.clone();
         p1.get(0).unwrap().borrow_mut().add_assign(5);
         assert_eq!(*p2.get(0).unwrap().borrow(), 6);
-        assert_eq!(p1.is_cached(), true);
+        assert_eq!(p1.is_fallback(), false);
     }
 
     #[test]
@@ -430,7 +449,7 @@ mod tests {
         let a = Rc::new(v);
         let pierce = Pierce::new(a);
         assert_eq!(&*pierce, "hello world");
-        assert_eq!(pierce.is_cached(), true);
+        assert_eq!(pierce.is_fallback(), false);
     }
 
     #[test]
@@ -439,7 +458,7 @@ mod tests {
         let a = Box::new(v);
         let pierce = Pierce::new(a);
         assert_eq!(*pierce.get(2).unwrap(), 3);
-        assert_eq!(pierce.is_cached(), true);
+        assert_eq!(pierce.is_fallback(), false);
     }
 
     #[test]
@@ -449,7 +468,7 @@ mod tests {
         assert_eq!(*Box::deref(Pierce::deref(&pierce_once)), 42);
         let pierce_twice = Pierce::new(pierce_once);
         assert_eq!(*Pierce::deref(&pierce_twice), 42);
-        assert_eq!(pierce_twice.is_cached(), true);
+        assert_eq!(pierce_twice.is_fallback(), false);
     }
 
     #[test]
@@ -478,7 +497,7 @@ mod tests {
         let weird_pierce = Pierce::new(Box::new(WeirdPointer {
             inner: RefCell::new(true),
         }));
-        assert_eq!(weird_pierce.is_cached(), true);
+        assert_eq!(weird_pierce.is_fallback(), false);
         assert_eq!(&**weird_normal, "hello");
         assert_eq!(&*weird_pierce, "hello");
         assert_eq!(&**weird_normal, "world");
@@ -499,7 +518,7 @@ mod tests {
         let c = StackPtr(b);
         let p = Pierce::new(c);
 
-        assert_eq!(p.is_cached(), false);
+        assert_eq!(p.is_fallback(), true);
     }
     #[test]
     fn test_box_stack() {
@@ -508,7 +527,7 @@ mod tests {
         let c = Box::new(b);
         let p = Pierce::new(c);
 
-        assert_eq!(p.is_cached(), true);
+        assert_eq!(p.is_fallback(), false);
     }
     #[test]
     fn test_stack_box() {
@@ -517,7 +536,7 @@ mod tests {
         let c = StackPtr(b);
         let p = Pierce::new(c);
 
-        assert_eq!(p.is_cached(), true);
+        assert_eq!(p.is_fallback(), false);
     }
 
     #[test]
@@ -527,6 +546,18 @@ mod tests {
         let c = Box::new(b);
         let p = Pierce::new(c);
 
-        assert_eq!(p.is_cached(), true);
+        assert_eq!(p.is_fallback(), false);
+    }
+
+    #[test]
+    fn test_no_pin_some() {
+        let b = Box::new(Box::new(50));
+        assert!(Pierce::new_no_pin(b).is_some());
+    }
+
+    #[test]
+    fn test_no_pin_none() {
+        let b = StackPtr(StackPtr(6));
+        assert!(Pierce::new_no_pin(b).is_none());
     }
 }
