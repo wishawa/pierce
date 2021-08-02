@@ -11,7 +11,7 @@ let vec: Vec<i32> = vec![1, 2, 3];
 let arc_vec = Arc::new(vec);
 let pierce = Pierce::new(arc_vec);
 
-// Here, the execution jumps directly to the slice. (Without Pierce it would have to jump to the Vec first, than from the Vec to the slice).
+// Here, the execution jumps directly to the slice to call `.get(...)`. (Without Pierce it would have to jump to the Vec first, than from the Vec to the slice).
 pierce.get(0).unwrap();
 ```
 
@@ -30,7 +30,7 @@ then follow the inner pointer to where the underlying data is. Two [Deref]-ings.
 let vec: Vec<i32> = vec![1, 2, 3];
 let arc_vec = Arc::new(vec);
 
-// Here, the `Arc<Vec<i32>>` is first dereferenced to the `Vec<i32>`, then the Vec is dereferenced to the underlying i32 slice.
+// Here, the `Arc<Vec<i32>>` is first dereferenced to the `Vec<i32>`, then the Vec is dereferenced to the underlying i32 slice, on which `.get(...)` is called.
 arc_vec.get(0).unwrap();
 ```
 
@@ -80,9 +80,7 @@ Here's a diagram of what it *might* look like.
 i.e. the deref target of the deref target of T (the outer pointer that is wrapped by Pierce),
 i.e. the deref target of the inner pointer.
 
-You can obtain a borrow of just T (the outer pointer) using `.borrow_inner()`.
-
-See [the quick example above](#quick-example)
+You can also obtain a borrow of just T (the outer pointer) using `.borrow_inner()`.
 
 See the docs at [`Pierce`] for more details.
 
